@@ -1,4 +1,3 @@
-//#define _CRT_SECURE_NO_WARNINGS
 #include "game.h"
 #include <iostream>
 #include <string>
@@ -8,24 +7,33 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
+using namespace std;
+using namespace sf;
 
 Game::Game()
     : window(sf::VideoMode(widthWindow, heightWindow), "SFML Game"),
     player(playerTexture, window.getSize().x, window.getSize().y),
-    menu(widthWindow, heightWindow)
+    menu(widthWindow, heightWindow), pause(widthWindow, heightWindow)
 {
-    sf::RenderWindow window(sf::VideoMode(widthWindow, heightWindow), "SFML GAME");
     window.setFramerateLimit(frameRate);
-
     playerHP = 50;
     score = 0;
+    charge = 10;
+    frameCD = 3.0f;
+    lightingCD = 3.0f;
+    lightingDR = 1.0f;
     currentWave = 0;
     enemiesNumb = 0;
     enemiesPlus = 0;
     startWave = 5;
     waveDelay = 3.0f;
     gameStart = false;
+    gamePause = false;
     autoShoot = false;
+    lightingActivated = false;
+    waveClock.restart();
+    lightingCooldownClock.restart();
+    lightingDurationClock.restart();
 
     currentState = GameState::Menu;
 
@@ -69,6 +77,12 @@ Game::Game()
     if (!bulletTexture.loadFromFile("Textures/Pokemon_Ball.png")) {
         //handle error
     }
+    if (!frameTexture.loadFromFile("Textures/frame.png")) {
+        //handle error
+    }
+    if (!lightingTexture.loadFromFile("Textures/lighting.png")) {
+        //handle error
+    }
     if (!enemyTexture.loadFromFile("Textures/Pokemon_Unit.png")) {
         //handle error
     }
@@ -87,6 +101,12 @@ void Game::HandleEvents()
                     if (currentState == GameState::Menu) menu.MoveUp();
                     break;
                 case sf::Keyboard::Down:
+                    if (currentState == GameState::Menu) menu.MoveDown();
+                    break;
+                case sf::Keyboard::W:
+                    if (currentState == GameState::Menu) menu.MoveUp();
+                    break;
+                case sf::Keyboard::S:
                     if (currentState == GameState::Menu) menu.MoveDown();
                     break;
                 case sf::Keyboard::Return:
@@ -113,12 +133,6 @@ void Game::HandleEvents()
                         }
                     }
                     break;
-                case sf::Keyboard::W:
-                    if (currentState == GameState::Menu) menu.MoveUp();
-                    break;
-                case sf::Keyboard::S:
-                    if (currentState == GameState::Menu) menu.MoveDown();
-                    break;
                 }
                 break;
             case sf::Event::Closed:
@@ -126,7 +140,6 @@ void Game::HandleEvents()
                 break;
             }
         }
-
         else if (currentState == GameState::LeaderBoard) {
             switch (event.type) {
             case sf::Event::KeyReleased:
@@ -139,16 +152,55 @@ void Game::HandleEvents()
                 break;
             }
         }
+        else if (currentState == GameState::Pause) {
+            switch (event.type) {
+            case sf::Event::KeyReleased:
+                switch (event.key.code) {
+                case sf::Keyboard::Up:
+                    if (currentState == GameState::Pause) menu.MoveUp();
+                    break;
+                case sf::Keyboard::Down:
+                    if (currentState == GameState::Pause) menu.MoveDown();
+                    break;
+                case sf::Keyboard::W:
+                    if (currentState == GameState::Pause) menu.MoveUp();
+                    break;
+                case sf::Keyboard::S:
+                    if (currentState == GameState::Pause) menu.MoveDown();
+                    break;
+                case sf::Keyboard::Return:
+                    if (currentState == GameState::Pause) {
+                        switch (menu.getPressItem()) {
+                        case 0:
+                            currentState = GameState::Game;
 
+                            break;
+                        case 1:
+                            currentState = GameState::Menu;
+
+                            break;
+                        }
+
+                    }
+                    break;
+                }
+            //case sf::Event::Closed:
+            //    window.close();
+                break;
+            }
+        }
         else if (currentState == GameState::Game) {
-            if (event.type == sf::Event::Closed)
-            {
+            if (event.type == sf::Event::Closed) {
                 window.close();
             }
-            if (sf::Keyboard::isKeyPressed(sf::Keyboard::T)) {
+            else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Escape)) {
+                currentState = GameState::Pause;
+
+            }
+            else if (sf::Keyboard::isKeyPressed(sf::Keyboard::T)) {
                 currentState = GameState::Menu;
                 FILE* fp;
-                if (fopen_s(&fp, "score.txt", "a") == 0) {
+                if (fopen_s(&fp, "leaderboard.txt", "a") == 0) {
                     fprintf(fp, "%d\n", score);
                     fclose(fp);
                 }
@@ -164,18 +216,16 @@ void Game::HandleEvents()
                 enemiesNumb = 0;
                 enemiesPlus = 0;
             }
-            if (event.type == sf::Event::MouseButtonPressed &&
-                event.mouseButton.button == sf::Mouse::Left)
-            {
+            else if (event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left) {
                 autoShoot = true;
             }
-            if (event.type == sf::Event::MouseButtonReleased &&
-                event.mouseButton.button == sf::Mouse::Left)
-            {
+            else if (event.type == sf::Event::MouseButtonReleased &&
+                event.mouseButton.button == sf::Mouse::Left) {
                 autoShoot = false;
             }
         }
-        if (event.type == sf::Event::Closed) {
+        else if (event.type == sf::Event::Closed) {
             window.close();
         }
     }
@@ -185,33 +235,68 @@ void Game::update() {
     srand(time(NULL));
 
     //Menu--------------------------------------------------------------
-
     if (currentState == GameState::Menu) {
         Menu menu(window.getSize().x, window.getSize().y);
     }
 
+    //Pause-------------------------------------------------------------
+    else if (currentState == GameState::Pause) {
+        Pause pause(window.getSize().x, window.getSize().y);
+    }
+
     //LeaderBoard-------------------------------------------------------
-
     else if (currentState == GameState::LeaderBoard) {
-        /*FILE* fp;
-        fp = fopen("score.txt", "r");
-        for (int i = 0; i < 5; i++) {
-            fscanf(fp, "%s", &temp);
-            nameFile[i] = temp;
-            fscanf(fp, "%d", &scoreFile);
-            userScore.push_back(std::make_pair(scoreFile[i], nameFile[i]));
+        ifstream inputFile("leaderboard.txt");
+        if (!inputFile.is_open())
+            return;
+        string line;
+        int list = 1;
+        int counter = 0;
+        int boardPos_Y = 90;
+        vector<int> scores;
+        vector<string> strings;
+        /* แยก String เป็น scores และ Username(strings) */
+        while (getline(inputFile, line)) {
+            stringstream ss(line);
+            vector<string> tokens;
+            string token;
+            while (ss >> token)
+                tokens.push_back(token);
+            scores.push_back(stod(tokens[1]));
+            strings.push_back(tokens[0]);
         }
-        sort(userScore.begin(), userScore.end());
-        fclose(fp);
-        fopen("score.txt", "w");
-        for (int i = 5; i >= 1; i--) {
-            strcpy(temp, userScore[i].second.c_str());
-            fprintf(fp, "%s %d", temp, userScore[i].first);
+        /* Sort คะแนนใน Leaderboard */
+        for (int i = 0; i < scores.size() - 1; i++) {
+            for (int n = i + 1; n < scores.size(); n++) {
+                if (scores[i] < scores[n]) {
+                    int x = scores[i];
+                    string str_x = strings[i];
+                    scores[i] = scores[n];
+                    strings[i] = strings[n];
+                    scores[n] = x;
+                    strings[n] = str_x;
+                }
+            }
         }
-        fclose(fp);*/
-
-        //loadLeaderBoard();
-
+        int size = scores.size();
+        if (size > 10)
+            size = 10;
+        for (int i = 0; i < size; i++) {
+            /* ตกแต่ง Text ตรงนี้ */
+            Text text;
+            text.setFont(font);
+            text.setFillColor(Color::White);
+            text.setOutlineColor(Color::Black);
+            text.setOutlineThickness(0.5);
+            text.setStyle(Text::Bold);
+            text.setString(strings[i] + " " + to_string(scores[i]));
+            FloatRect shapeBounds = text.getLocalBounds();
+            Vector2f shapeCenter(shapeBounds.left + shapeBounds.width / 2.f, shapeBounds.top + shapeBounds.height / 2.f);
+            text.setOrigin(shapeCenter);
+            text.setPosition(window.getSize().x / 2, boardPos_Y);
+            texts.push_back(text);
+            boardPos_Y += 30; // ระยะห่างระหว่างแต่ละ Text
+        }
         leaderBoard.setFont(font);
         leaderBoard.setCharacterSize(40);
         leaderBoard.setString("LEADERBOARD");
@@ -219,35 +304,14 @@ void Game::update() {
         leaderBoard.setOutlineThickness(3);
         leaderBoard.setOutlineColor(sf::Color::White);
         leaderBoard.setPosition(sf::Vector2f(20.0f, 20.0f));
-
-        //Top01 Player
-        //top1.setFont(font);
-        //top1.setCharacterSize(20);
-        //top1.setString(userScore[5].second);
-        //top1.setFillColor(sf::Color::Black);
-        //top1.setOutlineThickness(2);
-        //top1.setOutlineColor(sf::Color::White);
-        //top1.setPosition(sf::Vector2f(20.0f, 80.0f));
-        
-        //score1.setFont(font);
-        //score1.setCharacterSize(20);
-        //score1.setString(std::to_string(userScore[5].first));
-        //score1.setFillColor(sf::Color::Black);
-        //score1.setOutlineThickness(2);
-        //score1.setOutlineColor(sf::Color::White);
-        //score1.setPosition(sf::Vector2f(100.0f, 80.0f));
-
     }
 
     //Game--------------------------------------------------------------
-
     else if (currentState == GameState::Game) {
         //Infomation---------------------------
         sf::Vector2i mousePosition = sf::Mouse::getPosition(window);
         sf::Vector2f playerPosition = player.getPlayerShape().getPosition();
         sf::FloatRect playerBounds = player.getPlayerShape().getGlobalBounds();
-        
-        spawnEnemies();
 
         nameText.setFont(font);
         nameText.setCharacterSize(20);
@@ -276,25 +340,32 @@ void Game::update() {
         HPText.setOutlineColor(sf::Color::Black);
         HPText.setPosition(sf::Vector2f(20.0f, 100.0f));
 
-        //std::cout << enemiesNumb << std::endl;
+        chargeText.setFont(font);
+        chargeText.setCharacterSize(20);
+        chargeText.setFillColor(sf::Color::Red);
+        std::stringstream chargeShow;
+        chargeShow << "Frame Charge : " << charge;
+        chargeText.setString(chargeShow.str());
+        chargeText.setOutlineThickness(2);
+        chargeText.setOutlineColor(sf::Color::Black);
+        chargeText.setPosition(sf::Vector2f(20.0f, 140.0f));
 
         // Calculate delta time----------------
-        
         deltaTime = clock.restart().asSeconds();
 
         //Player-------------------------------
-
         player.move(window.getSize().x, window.getSize().y, deltaTime);
         if (playerHP > 50) {
             playerHP = 50;
         }
         else if (playerHP == 0) {
             currentState = GameState::Menu;
-            FILE* fp;
-            if (fopen_s(&fp, "score.txt", "a") == 0) {
-                fprintf(fp, "%d\n", score);
-                fclose(fp);
-            }
+            /* แสดงผล Leaderboard */
+            ofstream outputFile("leaderboard.txt", ios::app);
+            if (!outputFile.is_open())
+                return;
+            outputFile << playerName << " " << score << endl;
+            outputFile.close();
             playerHP = 50;
             score = 0;
             playerName = "";
@@ -312,22 +383,15 @@ void Game::update() {
         }
 
         //Bullet-------------------------------
-        
-        //Auto activate bullet's shooting
-        if (autoShoot && bulletFireClock.getElapsedTime().asSeconds() >= bulletFire)
-        {
+        if (autoShoot && bulletFireClock.getElapsedTime().asSeconds() >= bulletFire) {
             Bullet bullet(bulletTexture, playerPosition, sf::Vector2f(mousePosition),
                 widthWindow, heightWindow);
             bullets.push_back(bullet);
             bulletFireClock.restart();
         }
-
-        //Bullet's running function
-        for (auto bulletIt = bullets.begin(); bulletIt != bullets.end();)
-        {
-            bulletIt->move(deltaTime);
-            if (bulletIt->outsideWindow(widthWindow, heightWindow))
-            {
+        for (auto bulletIt = bullets.begin(); bulletIt != bullets.end();) {
+            bulletIt->move(bulletSpeed, deltaTime);
+            if (bulletIt->outsideWindow(widthWindow, heightWindow)) {
                 bulletIt = bullets.erase(bulletIt);
             }
             else {
@@ -335,19 +399,88 @@ void Game::update() {
             }
         }
 
+        //Frame--------------------------------
+        if (sf::Mouse::isButtonPressed(sf::Mouse::Right) && charge > 0 && 
+            frameClock.getElapsedTime().asSeconds() >= frameCD) {
+            Frame frame(frameTexture, playerPosition, sf::Vector2f(mousePosition),
+                widthWindow, heightWindow);
+            frames.push_back(frame);
+            charge -= 1;
+            frameClock.restart();
+        }
+        for (auto frameIt = frames.begin(); frameIt != frames.end();) {
+            frameIt->move(deltaTime);
+            if (frameIt->outsideWindow(widthWindow, heightWindow)) {
+                frameIt = frames.erase(frameIt);
+            }
+            else {
+                sf::FloatRect frameBounds = frameIt->getFrameShape().getGlobalBounds();
+                for (auto enemyIt = enemies.begin(); enemyIt != enemies.end();) {
+                    if (enemyIt->getEnemyShape().getGlobalBounds().intersects(frameBounds)) {
+                        enemyIt = enemies.erase(enemyIt);
+                        break;
+                    }
+                    else {
+                        ++enemyIt;
+                    }
+                }
+                if (frameIt != frames.end()) {
+                    ++frameIt;
+                }
+            }
+        }
+
+        //Lighting-----------------------------
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space) &&
+            lightingCooldownClock.getElapsedTime().asSeconds() >= lightingCD) {
+            lightingActivated = true;
+            lightingCooldownClock.restart();
+            lightingDurationClock.restart();
+            Lighting lighting(lightingTexture, playerPosition, widthWindow, heightWindow);
+            lightings.push_back(lighting);
+        }
+        if (lightingActivated) {
+            for (auto lightingIt = lightings.begin(); lightingIt != lightings.end();) {
+                lightingIt->move(deltaTime);
+                if (lightingDurationClock.getElapsedTime().asSeconds() >= lightingDR) {
+                    lightingActivated = false;
+                    lightingIt = lightings.erase(lightingIt);
+                }
+                else {
+                    sf::FloatRect lightingBounds = lightingIt->getLightingShape().getGlobalBounds();
+                    for (auto enemyIt = enemies.begin(); enemyIt != enemies.end();) {
+                        if (enemyIt->getEnemyShape().getGlobalBounds().intersects(lightingBounds)) {
+                            enemyIt = enemies.erase(enemyIt);
+                            break;
+                        }
+                        else {
+                            ++enemyIt;
+                        }
+                    }
+                    if (lightingIt != lightings.end()) {
+                        ++lightingIt;
+                    }
+                }
+            }
+        }
+
+
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space)) {
+            std::cout << "Space key is pressed" << std::endl;
+        }
+
         //Enemy--------------------------------
+        spawnEnemies();
 
         //Collision between player and enemies
         for (auto enemyIt = enemies.begin(); enemyIt != enemies.end();) {
             enemyIt->move(player.getPlayerShape().getPosition(), widthWindow, heightWindow, deltaTime);
-            if (enemyIt->enemyAssault(playerBounds))
-            {
-                playerHP -= 5;
+            if (enemyIt->enemyAssault(playerBounds)) {
+                playerHP -= 2;
                 score -= 1;
                 enemyIt = enemies.erase(enemyIt);
             }
-            else
-            {
+            else {
                 ++enemyIt;
             }
         }
@@ -360,9 +493,24 @@ void Game::update() {
                 if (enemyIt->getEnemyShape().getGlobalBounds().intersects(bulletBounds)) {
                     bulletIt = bullets.erase(bulletIt);
                     sf::Vector2f enemyPosition = enemyIt->getEnemyShape().getPosition();
+                    Item1 item1(bulletTexture, enemyPosition, widthWindow, heightWindow);
+                    Item2 item2(bulletTexture, enemyPosition, widthWindow, heightWindow);
+                    Item3 item3(bulletTexture, enemyPosition, widthWindow, heightWindow);
                     enemyIt = enemies.erase(enemyIt);
                     score += 2;
                     bulletRemoved = true;
+                    int itemRandom = rand() % 10;
+                    switch (itemRandom) {
+                    case 0:
+                        item1s.push_back(item1);
+                        break;
+                    case 5:
+                        item2s.push_back(item2);
+                        break;
+                    case 9:
+                        item3s.push_back(item3);
+                        break;
+                    }
                     break;
                 }
                 else {
@@ -371,6 +519,38 @@ void Game::update() {
             }
             if (!bulletRemoved) {
                 ++bulletIt;
+            }
+        }
+
+        //Item---------------------------------
+        for (auto item1It = item1s.begin(); item1It != item1s.end();) {
+            if (item1It->item1Picked(playerBounds)) {
+                playerHP += 3;
+                item1It = item1s.erase(item1It);
+            }
+            else {
+                ++item1It;
+            }
+        }
+
+        for (auto item2It = item2s.begin(); item2It != item2s.end();) {
+            if (item2It->item2Picked(playerBounds)) {
+                bulletSpeed += 10.0f;
+                bulletPS += 2.0f;
+                bulletFire = 1.0f / bulletPS;
+                item2It = item2s.erase(item2It);
+            }
+            else {
+                ++item2It;
+            }
+        }
+        for (auto item3It = item3s.begin(); item3It != item3s.end();) {
+            if (item3It->item3Picked(playerBounds)) {
+                charge += 1;
+                item3It = item3s.erase(item3It);
+            }
+            else {
+                ++item3It;
             }
         }
     }
@@ -382,15 +562,39 @@ void Game::render() {
         window.draw(menuBackground);
         menu.draw(window);
     }
+    else if (currentState == GameState::Pause) {
+        window.draw(inputBackground);
+        pause.draw(window);
+    }
     else if (currentState == GameState::LeaderBoard) {
         window.draw(leaderBoard);
-        //window.draw(top1);
+        auto it = texts.begin();
+        while (it != texts.end()) {
+            window.draw(*it);
+            it++;
+        }
+        texts.clear();
         //window.draw(score1);
     }
     else if (currentState == GameState::Game) {
         window.draw(mapInGame);
+        for (auto& item1 : item1s) {
+            item1.draw(window);
+        }
+        for (auto& item2 : item2s) {
+            item2.draw(window);
+        }
+        for (auto& item3 : item3s) {
+            item3.draw(window);
+        }
         for (auto& bullet : bullets) {
             bullet.draw(window);
+        }
+        for (auto& frame : frames) {
+            frame.draw(window);
+        }
+        for (auto& lighting : lightings) {
+            lighting.draw(window);
         }
         for (auto& enemy : enemies) {
             enemy.draw(window);
@@ -399,6 +603,7 @@ void Game::render() {
         window.draw(nameText);
         window.draw(scoreText);
         window.draw(HPText);
+        window.draw(chargeText);
     }
     window.display();
 }
@@ -457,30 +662,6 @@ void Game::inputPlayerName() {
     }
 }
 
-//void Game::loadLeaderBoard() {
-//    char temp[255];
-//    int scoreFile[6];
-//    std::string nameFile[6];
-//    std::vector <std::pair<int, std::string>> userScore;
-//
-//    FILE* fp;
-//    fp = fopen("score.txt", "r");
-//    for (int i = 0; i < 5; i++) {
-//        fscanf(fp, "%s", &temp);
-//        nameFile[i] = temp;
-//        fscanf(fp, "%d", &scoreFile);
-//        userScore.push_back(std::make_pair(scoreFile[i], nameFile[i]));
-//    }
-//    sort(userScore.begin(), userScore.end());
-//    fclose(fp);
-//    fopen("score.txt", "w");
-//    for (int i = 5; i >= 1; i--) {
-//        strcpy(temp, userScore[i].second.c_str());
-//        fprintf(fp, "%s %d", temp, userScore[i].first);
-//    }
-//    fclose(fp);
-//}
-
 void Game::spawnEnemies() {
     if (gameStart == true) {
         if (waveClock.getElapsedTime().asSeconds() >= waveDelay) {
@@ -500,7 +681,7 @@ void Game::spawnEnemies() {
                     spawnPosition_X = rand() % widthWindow;
                     spawnPosition_Y = rand() % 2 == 0 ? 0 :
                         heightWindow;
-                } 
+                }
                 else {
                     spawnPosition_X = rand() % 2 == 0 ? 0 :
                         widthWindow;
